@@ -58,6 +58,7 @@
   .slots { display: flex; gap: 4px; }
   .slot { width: 58px; text-align: center; }
   .slot.past { opacity: .45; }
+  .wind { font-size: 11px; font-weight: 600; color: var(--text); opacity: .85; height: 14px; margin-bottom: 1px; font-variant-numeric: tabular-nums; }
   .slot-label { font-size: 11px; color: var(--muted); }
   .bar-wrap { height: 90px; display: flex; align-items: flex-end; justify-content: center; margin: 4px 0; }
   .bar { width: 34px; border-radius: 6px 6px 2px 2px; min-height: 3px; }
@@ -166,10 +167,28 @@ function apiUrl(loc) {
     + `&hourly=${hourly}&timezone=auto&forecast_days=${FORECAST_DAYS}&cell_selection=sea`;
 }
 
+// Wind comes from the regular weather API (the marine API has none)
+function windUrl(loc) {
+  return 'https://api.open-meteo.com/v1/forecast'
+    + `?latitude=${loc.lat}&longitude=${loc.lon}`
+    + `&hourly=wind_speed_10m,wind_direction_10m&wind_speed_unit=kmh`
+    + `&timezone=auto&forecast_days=${FORECAST_DAYS}`;
+}
+
 async function fetchLocation(loc) {
   const res = await fetch(apiUrl(loc));
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  try {
+    const wr = await fetch(windUrl(loc));
+    if (wr.ok) {
+      const w = await wr.json();
+      if (w.hourly && w.hourly.wind_speed_10m) {
+        data.wind = { time: w.hourly.time, speed: w.hourly.wind_speed_10m, dir: w.hourly.wind_direction_10m };
+      }
+    }
+  } catch (e) { /* wind is optional, swell still shows without it */ }
+  return data;
 }
 
 // Pick swell values when present, fall back to total sea state
@@ -190,16 +209,21 @@ function buildModel(data) {
   const offsetMs = (data.utc_offset_seconds || 0) * 1000;
   const nowLocal = new Date(Date.now() + offsetMs).toISOString().slice(0, 13) + ':00';
 
+  const w = data.wind;
+  const windIndex = w ? new Map(w.time.map((t, i) => [t, i])) : null;
+
   const dates = [...new Set(h.time.map(t => t.slice(0, 10)))];
   const days = dates.map(date => ({
     date,
     slots: SLOTS.map(s => {
       const key = `${date}T${String(s.hour).padStart(2, '0')}:00`;
       const i = index.get(key);
+      const wi = windIndex ? windIndex.get(key) : undefined;
       return {
         label: s.label,
         past: key < nowLocal,
         value: i == null ? null : sample(h, i),
+        wind: wi == null || w.speed[wi] == null ? null : { speed: w.speed[wi], dir: w.dir[wi] },
       };
     }),
   }));
@@ -210,6 +234,12 @@ function buildModel(data) {
 
 // ---- Rendering ----------------------------------------------------------
 const MAX_KJ_BAR = 800;
+
+// Wind as direction plus km/h, e.g. NW10 (direction is where the wind comes from)
+function windHtml(w) {
+  const text = w && w.dir != null ? `${compass(w.dir)}${Math.round(w.speed)}` : '&nbsp;';
+  return `<div class="wind">${text}</div>`;
+}
 
 function dayLabel(date) {
   return new Date(date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric' });
@@ -227,12 +257,13 @@ function renderCard(loc, model, error) {
       const slots = d.slots.map(s => {
         const v = s.value;
         if (!v) {
-          return `<div class="slot${s.past ? ' past' : ''}"><div class="slot-label">${s.label}</div>
+          return `<div class="slot${s.past ? ' past' : ''}">${windHtml(s.wind)}<div class="slot-label">${s.label}</div>
             <div class="bar-wrap"></div><div class="kj">-</div></div>`;
         }
         const pct = Math.max(2, Math.min(100, (v.kj / barMax) * 100));
         const hot = v.kj >= settings.threshold && !s.past;
         return `<div class="slot${s.past ? ' past' : ''}${hot ? ' hot' : ''}">
+          ${windHtml(s.wind)}
           <div class="slot-label">${s.label}</div>
           <div class="bar-wrap"><div class="bar" style="height:${pct}%;background:${colourFor(v.kj)}"></div></div>
           <div class="kj">${Math.round(v.kj)}</div>
