@@ -1,0 +1,15 @@
+{
+  "name": "Surf kJ",
+  "short_name": "Surf kJ",
+  "description": "Wave energy forecast for Port Macquarie and Nias",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#06202e",
+  "theme_color": "#06202e",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

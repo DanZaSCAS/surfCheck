@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#06202e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Surf kJ">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Surf kJ</title>
+<style>
+  :root {
+    --bg: #06202e;
+    --panel: #0c2f43;
+    --line: #17465f;
+    --text: #e8f4f8;
+    --muted: #8fb3c4;
+    --accent: #4fd1c5;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    -webkit-text-size-adjust: 100%;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 16px 8px; gap: 12px;
+  }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .2px; }
+  .updated { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  button#refresh {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 10px; padding: 8px 14px; font-size: 14px; cursor: pointer;
+  }
+  button#refresh:active { background: var(--line); }
+  main { padding: 0 12px 24px; display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 900px) { main { max-width: 1100px; margin: 0 auto; } }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px 0 10px; }
+  .card-head { display: flex; justify-content: space-between; align-items: flex-end; padding: 0 14px 10px; gap: 12px; }
+  .loc { font-size: 18px; font-weight: 650; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .now { text-align: right; }
+  .now .big { font-size: 34px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+  .now .big small { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 3px; }
+  .now .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+  .scroller { overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 0 10px 4px; }
+  .grid { display: flex; gap: 6px; min-width: min-content; }
+  .day { flex: 0 0 auto; border-left: 1px solid var(--line); padding-left: 6px; }
+  .day:first-child { border-left: 0; padding-left: 0; }
+  .day-label { font-size: 12px; font-weight: 650; color: var(--text); text-align: center; padding: 2px 0 6px; }
+  .slots { display: flex; gap: 4px; }
+  .slot { width: 58px; text-align: center; }
+  .slot.past { opacity: .45; }
+  .slot-label { font-size: 11px; color: var(--muted); }
+  .bar-wrap { height: 90px; display: flex; align-items: flex-end; justify-content: center; margin: 4px 0; }
+  .bar { width: 34px; border-radius: 6px 6px 2px 2px; min-height: 3px; }
+  .kj { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .detail { font-size: 10.5px; color: var(--muted); margin-top: 2px; line-height: 1.25; }
+
+  .settings { display: flex; align-items: center; gap: 10px; padding: 0 16px 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+  .settings input {
+    width: 76px; background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 8px; font-size: 14px; margin: 0 4px;
+  }
+  .settings button {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer;
+  }
+  .settings button.on { border-color: var(--accent); color: var(--accent); }
+  .banner { margin: 0 14px 10px; padding: 8px 10px; border-radius: 10px; background: rgba(242,120,75,.14); border: 1px solid rgba(242,120,75,.5); color: #ffd9cc; font-size: 12.5px; line-height: 1.4; }
+  .slot.hot .bar { box-shadow: 0 0 0 2px #fff, 0 0 12px rgba(255,255,255,.35); }
+  .slot.hot .kj { color: #ffd166; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 4px 14px 0; font-size: 11px; color: var(--muted); }
+  .legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; background: var(--c); vertical-align: -1px; }
+  .error { color: #ffb4a8; padding: 10px 14px; font-size: 13px; }
+  .loading { color: var(--muted); padding: 24px 14px; font-size: 14px; }
+  footer { color: var(--muted); font-size: 11px; padding: 0 16px 24px; line-height: 1.5; text-align: center; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Surf kJ</h1>
+    <div class="updated" id="updated">Loading...</div>
+  </div>
+  <button id="refresh" type="button">Refresh</button>
+</header>
+
+<div class="settings">
+  <label>Alert at <input id="threshold" type="number" min="0" step="50" inputmode="numeric"> kJ</label>
+  <button id="notify" type="button">Enable notifications</button>
+</div>
+
+<main id="app"></main>
+
+<footer>
+  Wave energy is estimated from swell height and period (kJ per metre of wave crest).<br>
+  Marine data by <a href="https://open-meteo.com/">Open-Meteo.com</a>, wave models from DWD, ECMWF, NOAA and Meteo-France.
+  Forecast only, not for safety decisions.
+</footer>
+
+<script>
+// ---- Config: edit these to change spots ---------------------------------
+const LOCATIONS = [
+  { id: 'portmac', name: 'Port Macquarie', sub: 'NSW, Australia',          lat: -31.45, lon: 152.95 },
+  { id: 'nias',    name: 'Nias',           sub: 'North Sumatra, Indonesia', lat: 0.45,   lon: 97.75  },
+];
+// Local time of day used for each AM / PM / Night column
+const SLOTS = [
+  { label: 'AM',    hour: 8  },
+  { label: 'PM',    hour: 14 },
+  { label: 'Night', hour: 20 },
+];
+const FORECAST_DAYS = 7;
+const STALE_MINUTES = 30;
+const CACHE_KEY = 'surf-kj-cache-v1';
+const SETTINGS_KEY = 'surf-kj-settings-v1';
+const NOTIFIED_KEY = 'surf-kj-notified-v1';
+
+const settings = { threshold: 1000 };
+try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch (e) { /* ignore */ }
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* ignore */ }
+}
+
+// ---- Wave energy --------------------------------------------------------
+// Energy of one wavelength per metre of crest, deep water linear theory:
+//   E = (rho * g * H^2 / 8) * L, with L = 1.56 * T^2
+// Reproduces the kJ figures on surf-forecast.com to within a few percent.
+function waveKj(heightM, periodS) {
+  if (heightM == null || periodS == null) return null;
+  const rho = 1025, g = 9.81;
+  const wavelength = 1.56 * periodS * periodS;
+  return (rho * g * heightM * heightM / 8) * wavelength / 1000;
+}
+
+const COLOURS = [
+  { max: 50,       c: '#4a6a80', name: 'Under 50' },
+  { max: 150,      c: '#3b82c4', name: '50 to 150' },
+  { max: 300,      c: '#2bb3a6', name: '150 to 300' },
+  { max: 500,      c: '#8fd14f', name: '300 to 500' },
+  { max: 800,      c: '#f2c94c', name: '500 to 800' },
+  { max: Infinity, c: '#f2784b', name: '800+' },
+];
+const colourFor = kj => (COLOURS.find(b => kj < b.max) || COLOURS[0]).c;
+
+const COMPASS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+const compass = deg => deg == null ? '' : COMPASS[Math.round(deg / 22.5) % 16];
+
+// ---- Data ---------------------------------------------------------------
+function apiUrl(loc) {
+  const hourly = [
+    'swell_wave_height', 'swell_wave_period', 'swell_wave_direction',
+    'wave_height', 'wave_period', 'wave_direction',
+  ].join(',');
+  return 'https://marine-api.open-meteo.com/v1/marine'
+    + `?latitude=${loc.lat}&longitude=${loc.lon}`
+    + `&hourly=${hourly}&timezone=auto&forecast_days=${FORECAST_DAYS}&cell_selection=sea`;
+}
+
+async function fetchLocation(loc) {
+  const res = await fetch(apiUrl(loc));
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// Pick swell values when present, fall back to total sea state
+function sample(h, i) {
+  let height = h.swell_wave_height[i], period = h.swell_wave_period[i], dir = h.swell_wave_direction[i];
+  let source = 'swell';
+  if (height == null || period == null) {
+    height = h.wave_height[i]; period = h.wave_period[i]; dir = h.wave_direction[i];
+    source = 'total';
+  }
+  if (height == null || period == null) return null;
+  return { height, period, dir, kj: waveKj(height, period), source };
+}
+
+function buildModel(data) {
+  const h = data.hourly;
+  const index = new Map(h.time.map((t, i) => [t, i]));
+  const offsetMs = (data.utc_offset_seconds || 0) * 1000;
+  const nowLocal = new Date(Date.now() + offsetMs).toISOString().slice(0, 13) + ':00';
+
+  const dates = [...new Set(h.time.map(t => t.slice(0, 10)))];
+  const days = dates.map(date => ({
+    date,
+    slots: SLOTS.map(s => {
+      const key = `${date}T${String(s.hour).padStart(2, '0')}:00`;
+      const i = index.get(key);
+      return {
+        label: s.label,
+        past: key < nowLocal,
+        value: i == null ? null : sample(h, i),
+      };
+    }),
+  }));
+
+  const ni = index.has(nowLocal) ? index.get(nowLocal) : 0;
+  return { days, now: sample(h, ni) };
+}
+
+// ---- Rendering ----------------------------------------------------------
+const MAX_KJ_BAR = 800;
+
+function dayLabel(date) {
+  return new Date(date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric' });
+}
+
+function renderCard(loc, model, error) {
+  let body;
+  if (!model) {
+    body = `<div class="${error ? 'error' : 'loading'}">${error ? 'Could not load forecast: ' + error : 'Loading...'}</div>`;
+  } else {
+    // Scale bars to the biggest slot in this card (never below 800 kJ) so large swells do not all max out
+    const allKj = model.days.flatMap(d => d.slots.map(s => (s.value ? s.value.kj : 0)));
+    const barMax = Math.max(MAX_KJ_BAR, ...allKj);
+    const cols = model.days.map(d => {
+      const slots = d.slots.map(s => {
+        const v = s.value;
+        if (!v) {
+          return `<div class="slot${s.past ? ' past' : ''}"><div class="slot-label">${s.label}</div>
+            <div class="bar-wrap"></div><div class="kj">-</div></div>`;
+        }
+        const pct = Math.max(2, Math.min(100, (v.kj / barMax) * 100));
+        const hot = v.kj >= settings.threshold && !s.past;
+        return `<div class="slot${s.past ? ' past' : ''}${hot ? ' hot' : ''}">
+          <div class="slot-label">${s.label}</div>
+          <div class="bar-wrap"><div class="bar" style="height:${pct}%;background:${colourFor(v.kj)}"></div></div>
+          <div class="kj">${Math.round(v.kj)}</div>
+          <div class="detail">${v.height.toFixed(1)}m ${Math.round(v.period)}s<br>${compass(v.dir)}</div>
+        </div>`;
+      }).join('');
+      return `<div class="day"><div class="day-label">${dayLabel(d.date)}</div><div class="slots">${slots}</div></div>`;
+    }).join('');
+
+    const hits = [];
+    model.days.forEach(d => d.slots.forEach(s => {
+      if (!s.past && s.value && s.value.kj >= settings.threshold) {
+        hits.push(`${dayLabel(d.date)} ${s.label} (${Math.round(s.value.kj)})`);
+      }
+    }));
+    const banner = hits.length
+      ? `<div class="banner">Above ${settings.threshold} kJ: ${hits.slice(0, 5).join(', ')}${hits.length > 5 ? ' and ' + (hits.length - 5) + ' more' : ''}</div>`
+      : '';
+
+    body = `${banner}<div class="scroller"><div class="grid">${cols}</div></div>
+      <div class="legend">${COLOURS.map(b => `<span style="--c:${b.c}">${b.name}</span>`).join('')}</div>`;
+  }
+
+  const n = model && model.now;
+  const nowBlock = n
+    ? `<div class="now"><div class="big">${Math.round(n.kj)}<small>kJ</small></div>
+       <div class="meta">now: ${n.height.toFixed(1)}m ${Math.round(n.period)}s ${compass(n.dir)}</div></div>`
+    : '';
+
+  return `<section class="card" id="card-${loc.id}">
+    <div class="card-head">
+      <div><div class="loc">${loc.name}</div><div class="sub">${loc.sub}</div></div>
+      ${nowBlock}
+    </div>${body}</section>`;
+}
+
+const app = document.getElementById('app');
+const updatedEl = document.getElementById('updated');
+let state = {};   // id -> { model, error }
+let fetchedAt = 0;
+
+function render() {
+  app.innerHTML = LOCATIONS.map(l => renderCard(l, state[l.id] && state[l.id].model, state[l.id] && state[l.id].error)).join('');
+  if (fetchedAt) {
+    updatedEl.textContent = 'Updated ' + new Date(fetchedAt).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+  }
+}
+
+function loadCache() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+    if (!raw) return;
+    fetchedAt = raw.ts;
+    for (const l of LOCATIONS) if (raw.data[l.id]) state[l.id] = { model: buildModel(raw.data[l.id]) };
+  } catch (e) { /* ignore corrupt cache */ }
+}
+
+function saveCache(raw) {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: fetchedAt, data: raw })); } catch (e) { /* storage full or blocked */ }
+}
+
+async function refresh() {
+  const btn = document.getElementById('refresh');
+  btn.disabled = true; btn.textContent = 'Loading...';
+  const raw = {};
+  let anyOk = false;
+  await Promise.all(LOCATIONS.map(async loc => {
+    try {
+      const data = await fetchLocation(loc);
+      raw[loc.id] = data;
+      state[loc.id] = { model: buildModel(data) };
+      anyOk = true;
+    } catch (err) {
+      // keep any cached model, just flag the error if there is nothing to show
+      if (!state[loc.id] || !state[loc.id].model) state[loc.id] = { error: err.message };
+    }
+  }));
+  if (anyOk) {
+    fetchedAt = Date.now();
+    // merge so one failed location does not wipe the other's cache
+    try {
+      const old = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+      saveCache(Object.assign({}, old && old.data, raw));
+    } catch (e) { saveCache(raw); }
+  }
+  render();
+  if (anyOk) notifyNew();
+  if (!anyOk && fetchedAt) {
+    updatedEl.textContent = 'Offline, showing saved forecast from '
+      + new Date(fetchedAt).toLocaleString('en-AU', { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  }
+  btn.disabled = false; btn.textContent = 'Refresh';
+}
+
+// ---- Alerts -------------------------------------------------------------
+// Notifications fire when the app is opened or refreshed and a new slot is
+// forecast to reach the threshold. True background push needs a server.
+function upcomingHits() {
+  const hits = [];
+  for (const loc of LOCATIONS) {
+    const m = state[loc.id] && state[loc.id].model;
+    if (!m) continue;
+    for (const d of m.days) for (const s of d.slots) {
+      if (!s.past && s.value && s.value.kj >= settings.threshold) {
+        hits.push({ loc, d, s, key: `${loc.id}|${d.date}|${s.label}|${settings.threshold}` });
+      }
+    }
+  }
+  return hits;
+}
+
+async function notifyNew() {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  let seen = [];
+  try { seen = JSON.parse(localStorage.getItem(NOTIFIED_KEY) || '[]'); } catch (e) { /* ignore */ }
+  const fresh = upcomingHits().filter(h => !seen.includes(h.key));
+  if (!fresh.length) return;
+
+  const byLoc = {};
+  fresh.forEach(h => { (byLoc[h.loc.id] = byLoc[h.loc.id] || { loc: h.loc, items: [] }).items.push(h); });
+  for (const { loc, items } of Object.values(byLoc)) {
+    const peak = Math.round(Math.max(...items.map(h => h.s.value.kj)));
+    const title = `${loc.name}: up to ${peak} kJ coming`;
+    const body = items.slice(0, 3).map(h => `${dayLabel(h.d.date)} ${h.s.label} ${Math.round(h.s.value.kj)}`).join(', ');
+    const opts = { body, icon: 'icon-192.png', tag: 'surf-' + loc.id };
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification(title, opts);
+    } catch (e) {
+      try { new Notification(title, opts); } catch (_) { /* not supported here */ }
+    }
+  }
+  try { localStorage.setItem(NOTIFIED_KEY, JSON.stringify(seen.concat(fresh.map(h => h.key)).slice(-200))); } catch (e) { /* ignore */ }
+}
+
+function updateNotifyButton() {
+  const b = document.getElementById('notify');
+  if (!('Notification' in window)) { b.textContent = 'Notifications not supported'; b.disabled = true; return; }
+  if (Notification.permission === 'granted') { b.textContent = 'Notifications on'; b.classList.add('on'); }
+  else if (Notification.permission === 'denied') { b.textContent = 'Notifications blocked'; b.disabled = true; }
+  else { b.textContent = 'Enable notifications'; b.classList.remove('on'); }
+}
+
+const thresholdInput = document.getElementById('threshold');
+thresholdInput.value = settings.threshold;
+thresholdInput.addEventListener('change', () => {
+  const n = Number(thresholdInput.value);
+  settings.threshold = Number.isFinite(n) && n > 0 ? n : 1000;
+  thresholdInput.value = settings.threshold;
+  saveSettings();
+  render();
+  notifyNew();
+});
+document.getElementById('notify').addEventListener('click', async () => {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') await Notification.requestPermission();
+  updateNotifyButton();
+  notifyNew();
+});
+updateNotifyButton();
+
+document.getElementById('refresh').addEventListener('click', refresh);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && Date.now() - fetchedAt > STALE_MINUTES * 60000) refresh();
+});
+
+loadCache();
+render();
+refresh();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
