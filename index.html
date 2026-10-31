@@ -70,6 +70,10 @@
     width: 76px; background: var(--panel); color: var(--text); border: 1px solid var(--line);
     border-radius: 8px; padding: 6px 8px; font-size: 14px; margin: 0 4px;
   }
+  .settings select {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 8px; font-size: 14px; margin-left: 4px;
+  }
   .settings button {
     background: var(--panel); color: var(--text); border: 1px solid var(--line);
     border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer;
@@ -97,13 +101,14 @@
 
 <div class="settings">
   <label>Alert at <input id="threshold" type="number" min="0" step="50" inputmode="numeric"> kJ</label>
+  <label>Model <select id="model"></select></label>
   <button id="notify" type="button">Enable notifications</button>
 </div>
 
 <main id="app"></main>
 
 <footer>
-  Wave energy is estimated from swell height and period (kJ per metre of wave crest).<br>
+  Wave energy is estimated from swell height and peak period, summed across swell trains (kJ per metre of wave crest).<br>
   Marine data by <a href="https://open-meteo.com/">Open-Meteo.com</a>, wave models from DWD, ECMWF, NOAA and Meteo-France.
   Forecast only, not for safety decisions.
 </footer>
@@ -122,11 +127,20 @@ const SLOTS = [
 ];
 const FORECAST_DAYS = 7;
 const STALE_MINUTES = 30;
-const CACHE_KEY = 'surf-kj-cache-v1';
+const CACHE_KEY = 'surf-kj-cache-v2';
+// Wave models offered in the picker (Open-Meteo "models" parameter values).
+// Port Macquarie sits outside the 0.16 degree GFS grid (52.5N to 15S), so only the 0.25 version is listed.
+const MODELS = [
+  { id: 'best_match',        name: 'Best match' },
+  { id: 'ecmwf_wam025',      name: 'ECMWF WAM' },
+  { id: 'ncep_gfswave025',   name: 'NOAA GFS Wave' },
+  { id: 'meteofrance_wave',  name: 'Meteo-France MFWAM' },
+  { id: 'dwd_gwam',          name: 'DWD GWAM' },
+];
 const SETTINGS_KEY = 'surf-kj-settings-v1';
 const NOTIFIED_KEY = 'surf-kj-notified-v1';
 
-const settings = { threshold: 1000 };
+const settings = { threshold: 1000, model: 'ncep_gfswave025' };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch (e) { /* ignore */ }
 function saveSettings() {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* ignore */ }
@@ -159,12 +173,15 @@ const compass = deg => deg == null ? '' : COMPASS[Math.round(deg / 22.5) % 16];
 // ---- Data ---------------------------------------------------------------
 function apiUrl(loc) {
   const hourly = [
-    'swell_wave_height', 'swell_wave_period', 'swell_wave_direction',
-    'wave_height', 'wave_period', 'wave_direction',
+    'swell_wave_height', 'swell_wave_period', 'swell_wave_peak_period', 'swell_wave_direction',
+    'secondary_swell_wave_height', 'secondary_swell_wave_period', 'secondary_swell_wave_direction',
+    'tertiary_swell_wave_height', 'tertiary_swell_wave_period', 'tertiary_swell_wave_direction',
+    'wave_height', 'wave_period', 'wave_peak_period', 'wave_direction',
   ].join(',');
+  const models = settings.model && settings.model !== 'best_match' ? `&models=${settings.model}` : '';
   return 'https://marine-api.open-meteo.com/v1/marine'
     + `?latitude=${loc.lat}&longitude=${loc.lon}`
-    + `&hourly=${hourly}&timezone=auto&forecast_days=${FORECAST_DAYS}&cell_selection=sea`;
+    + `&hourly=${hourly}${models}&timezone=auto&forecast_days=${FORECAST_DAYS}&cell_selection=sea`;
 }
 
 // Wind comes from the regular weather API (the marine API has none)
@@ -191,16 +208,40 @@ async function fetchLocation(loc) {
   return data;
 }
 
-// Pick swell values when present, fall back to total sea state
+// Read one hourly value. Open-Meteo may suffix keys with the model name when a model is requested.
+function val(h, name, i) {
+  let arr = h[name];
+  if (!arr && settings.model && settings.model !== 'best_match') arr = h[`${name}_${settings.model}`];
+  return arr ? arr[i] : null;
+}
+
+// Energy is summed over every swell train the model reports (primary, secondary, tertiary),
+// the way the eye (and Surfline) sees them stacked. The primary uses PEAK period, which is what
+// surf sites quote as "13 seconds"; the mean period runs 1 to 3 s shorter and energy scales with T squared.
+// Falls back to total sea state if the model has no swell partition for this hour.
 function sample(h, i) {
-  let height = h.swell_wave_height[i], period = h.swell_wave_period[i], dir = h.swell_wave_direction[i];
+  const trains = [];
+  const add = (height, period, dir, peak) => {
+    // Models report 0 m / 0 s for an absent train, so require real values
+    if (height != null && period != null && height > 0 && period > 0) trains.push({ height, period, dir, peak, kj: waveKj(height, period) });
+  };
+  const pPeak = val(h, 'swell_wave_peak_period', i);
+  const pMean = val(h, 'swell_wave_period', i);
+  add(val(h, 'swell_wave_height', i), pPeak != null ? pPeak : pMean, val(h, 'swell_wave_direction', i), pPeak != null);
+  add(val(h, 'secondary_swell_wave_height', i), val(h, 'secondary_swell_wave_period', i), val(h, 'secondary_swell_wave_direction', i), false);
+  add(val(h, 'tertiary_swell_wave_height', i), val(h, 'tertiary_swell_wave_period', i), val(h, 'tertiary_swell_wave_direction', i), false);
+
   let source = 'swell';
-  if (height == null || period == null) {
-    height = h.wave_height[i]; period = h.wave_period[i]; dir = h.wave_direction[i];
+  if (!trains.length) {
+    const tPeak = val(h, 'wave_peak_period', i);
+    add(val(h, 'wave_height', i), tPeak != null ? tPeak : val(h, 'wave_period', i), val(h, 'wave_direction', i), tPeak != null);
     source = 'total';
   }
-  if (height == null || period == null) return null;
-  return { height, period, dir, kj: waveKj(height, period), source };
+  if (!trains.length) return null;
+
+  const main = trains[0];
+  const kj = trains.reduce((sum, t) => sum + t.kj, 0);
+  return { height: main.height, period: main.period, dir: main.dir, kj, source, extra: trains.slice(1) };
 }
 
 function buildModel(data) {
@@ -267,7 +308,7 @@ function renderCard(loc, model, error) {
           <div class="slot-label">${s.label}</div>
           <div class="bar-wrap"><div class="bar" style="height:${pct}%;background:${colourFor(v.kj)}"></div></div>
           <div class="kj">${Math.round(v.kj)}</div>
-          <div class="detail">${v.height.toFixed(1)}m ${Math.round(v.period)}s<br>${compass(v.dir)}</div>
+          <div class="detail">${v.height.toFixed(1)}m ${Math.round(v.period)}s<br>${compass(v.dir)}${v.source === 'total' ? ' (sea)' : ''}${v.extra && v.extra.length ? '<br>+' + v.extra.map(t => t.height.toFixed(1) + 'm ' + Math.round(t.period) + 's').join(' +') : ''}</div>
         </div>`;
       }).join('');
       return `<div class="day"><div class="day-label">${dayLabel(d.date)}</div><div class="slots">${slots}</div></div>`;
@@ -315,14 +356,14 @@ function render() {
 function loadCache() {
   try {
     const raw = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
-    if (!raw) return;
+    if (!raw || raw.model !== settings.model) return;
     fetchedAt = raw.ts;
     for (const l of LOCATIONS) if (raw.data[l.id]) state[l.id] = { model: buildModel(raw.data[l.id]) };
   } catch (e) { /* ignore corrupt cache */ }
 }
 
 function saveCache(raw) {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: fetchedAt, data: raw })); } catch (e) { /* storage full or blocked */ }
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: fetchedAt, model: settings.model, data: raw })); } catch (e) { /* storage full or blocked */ }
 }
 
 async function refresh() {
@@ -346,7 +387,7 @@ async function refresh() {
     // merge so one failed location does not wipe the other's cache
     try {
       const old = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
-      saveCache(Object.assign({}, old && old.data, raw));
+      saveCache(Object.assign({}, old && old.model === settings.model ? old.data : {}, raw));
     } catch (e) { saveCache(raw); }
   }
   render();
@@ -416,6 +457,19 @@ thresholdInput.addEventListener('change', () => {
   saveSettings();
   render();
   notifyNew();
+});
+const modelSelect = document.getElementById('model');
+modelSelect.innerHTML = MODELS.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+if (!MODELS.some(m => m.id === settings.model)) settings.model = 'ncep_gfswave025';
+modelSelect.value = settings.model;
+modelSelect.addEventListener('change', () => {
+  settings.model = modelSelect.value;
+  saveSettings();
+  state = {};
+  fetchedAt = 0;
+  loadCache();
+  render();
+  refresh();
 });
 document.getElementById('notify').addEventListener('click', async () => {
   if (!('Notification' in window)) return;
